@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Windows-style 3-finger gestures on Linux Mint Cinnamon — Swastik</title>
+<meta name="description" content="Getting swipe-to-switch-workspace working on Cinnamon: Touchégg's two-process architecture, the RUN_COMMAND gotcha, and opening Expo via D-Bus.">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<header class="site-head">
+  <nav>
+    <a class="brand" href="/">swastik.dev</a>
+    <a href="/#posts">posts</a>
+    <a href="https://github.com/Swastik36">github</a>
+  </nav>
+</header>
+<article class="post">
+  <h1>Windows-style 3-finger gestures on Linux Mint Cinnamon</h1>
+  <div class="post-meta">2026-08-17 · <a href="https://github.com/Swastik36/touchegg-gestures">repo</a></div>
+
+  <p>Coming from Windows, the one thing I immediately missed was swiping with 3–4 fingers to switch virtual desktops. On Linux Mint Cinnamon it just doesn't exist out of the box, and the path to getting it working turned out to be full of small, mostly undocumented traps. This is the story and the working setup.</p>
+
+  <h2>Why it doesn't work out of the box</h2>
+  <p>Cinnamon's window manager (Muffin) has no native handling for multi-finger swipes. There's a gesture engine under <code>org.cinnamon.gestures</code>, but it's limited, disabled by default, and the actions it supports are fixed — you can't map a gesture to an arbitrary key or command. The standard solution is <strong>Touchégg</strong>, a daemon that grabs the touchpad via libinput and turns gestures into actions.</p>
+
+  <h2>Installing Touchégg</h2>
+  <pre><code>sudo apt install touchegg
+sudo systemctl disable --now touchegg</code></pre>
+  <p>The second line is important. The Debian package installs a <em>system service running as root</em>. Root daemons ignore your <code>~/.config/touchegg/touchegg.conf</code>, so gestures configured in your home dir silently never fire.</p>
+
+  <h2>Trap #1: Touchégg is two processes</h2>
+  <p>Here's the part that cost me the most time. Touchégg v2 is split in two:</p>
+  <ul>
+    <li><code>touchegg --daemon</code> — grabs the touchpad and <strong>gathers gestures</strong>, executing nothing</li>
+    <li><code>touchegg</code> (no args) — the <strong>client</strong>: reads your config and executes the actions, talking to the daemon over D-Bus</li>
+  </ul>
+  <p>Run only the daemon and your gestures are collected and silently dropped. Run only the client and it can't connect. Both must be running, and both must start at login:</p>
+  <pre><code>nohup /usr/bin/touchegg --daemon >/dev/null 2>&1 &amp;
+nohup /usr/bin/touchegg >/dev/null 2>&1 &amp;</code></pre>
+
+  <h2>Trap #2: <code>EXECUTE</code> doesn't exist in v2</h2>
+  <p>Every tutorial online says to use <code>&lt;action type="EXECUTE"&gt;&lt;execute&gt;cmd&lt;/execute&gt;&lt;/action&gt;</code>. In Touchégg v2 the action was renamed to <strong><code>RUN_COMMAND</code></strong> with a <code>&lt;command&gt;</code> parameter. With the old syntax the client logs the wonderfully unhelpful:</p>
+  <blockquote>Ignoring this gesture. This could mean no action is configured, the configured action is not supported…</blockquote>
+  <p>Running the client with <code>--debug</code> is what exposed the real problem.</p>
+
+  <h2>Trap #3: Expo has no keybinding</h2>
+  <p>I wanted swipe-up for the Mint menu and swipe-down for the <em>workspace view</em> (Expo). But Cinnamon's Expo — the all-workspaces overview — has <strong>no keyboard shortcut</strong> at all; it's only reachable via the hot corner. Touchégg can only send keys or run commands. The workaround: Cinnamon exposes a JS eval over D-Bus, and <code>imports.ui.main.expo.toggle()</code> exists in its UI namespace:</p>
+  <pre><code>gdbus call --session --dest org.Cinnamon --object-path /org/Cinnamon \
+  --method org.Cinnamon.Eval "imports.ui.main.expo.toggle()"</code></pre>
+
+  <h2>The final config</h2>
+  <table>
+    <thead><tr><th>Gesture</th><th>Action</th></tr></thead>
+    <tbody>
+      <tr><td>3-finger swipe <strong>UP</strong></td><td>Mint menu (Super)</td></tr>
+      <tr><td>3-finger swipe <strong>DOWN</strong></td><td>Expo — workspace view via D-Bus eval</td></tr>
+      <tr><td>3-finger swipe <strong>LEFT</strong></td><td>Next workspace</td></tr>
+      <tr><td>3-finger swipe <strong>RIGHT</strong></td><td>Previous workspace</td></tr>
+    </tbody>
+  </table>
+  <pre><code>&lt;touchégg&gt;
+  &lt;settings&gt;
+    &lt;property name="animation_delay"&gt;150&lt;/property&gt;
+    &lt;property name="action_execute_threshold"&gt;20&lt;/property&gt;
+  &lt;/settings&gt;
+  &lt;application name="All"&gt;
+    &lt;gesture type="SWIPE" fingers="3" direction="UP"&gt;
+      &lt;action type="SEND_KEYS"&gt;
+        &lt;modifiers&gt;Super_L&lt;/modifiers&gt;
+        &lt;keys&gt;&lt;/keys&gt;
+      &lt;/action&gt;
+    &lt;/gesture&gt;
+    &lt;gesture type="SWIPE" fingers="3" direction="DOWN"&gt;
+      &lt;action type="RUN_COMMAND"&gt;
+        &lt;command&gt;sh -c 'gdbus call --session --dest org.Cinnamon --object-path /org/Cinnamon --method org.Cinnamon.Eval "imports.ui.main.expo.toggle()"'&lt;/command&gt;
+      &lt;/action&gt;
+    &lt;/gesture&gt;
+    &lt;gesture type="SWIPE" fingers="3" direction="LEFT"&gt;
+      &lt;action type="SEND_KEYS"&gt;
+        &lt;modifiers&gt;Control_L+Alt_L&lt;/modifiers&gt;
+        &lt;keys&gt;Right&lt;/keys&gt;
+      &lt;/action&gt;
+    &lt;/gesture&gt;
+    &lt;gesture type="SWIPE" fingers="3" direction="RIGHT"&gt;
+      &lt;action type="SEND_KEYS"&gt;
+        &lt;modifiers&gt;Control_L+Alt_L&lt;/modifiers&gt;
+        &lt;keys&gt;Left&lt;/keys&gt;
+      &lt;/action&gt;
+    &lt;/gesture&gt;
+  &lt;/application&gt;
+&lt;/touchégg&gt;</code></pre>
+
+  <h2>Summary</h2>
+  <p>Three traps, three fixes: kill the root daemon, run both processes, use <code>RUN_COMMAND</code>. Everything else — the workspace keybindings, the Expo eval — is Cinnamon specifics. The full portable setup (config + README) is on <a href="https://github.com/Swastik36/touchegg-gestures">GitHub</a>, so I never have to debug this again on the next machine.</p>
+</article>
+<footer>
+  <p>© 2026 Swastik · hosted on GitHub Pages</p>
+</footer>
+</body>
+</html>

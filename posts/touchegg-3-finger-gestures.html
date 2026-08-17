@@ -26,8 +26,9 @@
 
   <h2>Installing Touchégg</h2>
   <pre><code>sudo apt install touchegg
-sudo systemctl disable --now touchegg</code></pre>
-  <p>The second line is important. The Debian package installs a <em>system service running as root</em>. Root daemons ignore your <code>~/.config/touchegg/touchegg.conf</code>, so gestures configured in your home dir silently never fire.</p>
+sudo systemctl disable --now touchegg
+sudo usermod -a -G input "$USER"   # grant access to /dev/input/event* (needs re-login)</code></pre>
+  <p>The second line is important. The Debian package installs a <em>system service running as root</em>. Root daemons ignore your <code>~/.config/touchegg/touchegg.conf</code>, so gestures configured in your home dir silently never fire. The third line bit me on a clean install: input devices are owned by <code>root:input</code> with mode <code>crw-rw----</code>, and the user-level daemon can't open them without the <code>input</code> group. To test before re-logging in: <code>sg input -c 'nohup /usr/bin/touchegg --daemon &gt;/dev/null 2&gt;&amp;1 &amp;'</code>.</p>
 
   <h2>Trap #1: Touchégg is two processes</h2>
   <p>Here's the part that cost me the most time. Touchégg v2 is split in two:</p>
@@ -92,7 +93,7 @@ nohup /usr/bin/touchegg >/dev/null 2>&1 &amp;</code></pre>
 &lt;/touchégg&gt;</code></pre>
 
   <h2>Summary</h2>
-  <p>Three traps, three fixes: kill the root daemon, run both processes, use <code>RUN_COMMAND</code>. Everything else — the workspace keybindings, the Expo eval — is Cinnamon specifics. The full portable setup (config + README) is on <a href="https://github.com/Swastik36/touchegg-gestures">GitHub</a>, so I never have to debug this again on the next machine.</p>
+  <p>Three traps, three fixes: kill the root daemon, run both processes, use <code>RUN_COMMAND</code> — and don't forget the <code>input</code> group. Everything else — the workspace keybindings, the Expo eval — is Cinnamon specifics. The full portable setup (config + README) is on <a href="https://github.com/Swastik36/touchegg-gestures">GitHub</a>, so I never have to debug this again on the next machine.</p>
 </article>
 <footer>
   <p>© 2026 Swastik · hosted on GitHub Pages</p>
